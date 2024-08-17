@@ -1,3 +1,4 @@
+from openpilot.common.params import Params
 import copy
 from opendbc.car import apply_meas_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance, make_tester_present_msg, structs
 from opendbc.car.can_definitions import CanData
@@ -11,6 +12,7 @@ from opendbc.can.packer import CANPacker
 
 SteerControlType = structs.CarParams.SteerControlType
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
+LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
@@ -19,6 +21,14 @@ MAX_STEER_RATE_FRAMES = 18  # tx control frames needed before torque can be cut
 
 # EPS allows user torque above threshold for 50 frames before permanently faulting
 MAX_USER_TORQUE = 500
+
+# Ale Sato stuff
+UNLOCK_CMD =       b'\x40\x05\x30\x11\x00\x40\x00\x00'
+LOCK_CMD =         b'\x40\x05\x30\x11\x00\x80\x00\x00'
+HORN_ON_CMD =      b'\x40\x04\x30\x06\x00\x20\x00\x00'
+HORN_OFF_CMD =     b'\x40\x04\x30\x06\x00\x00\x00\x00'
+HIGHBEAM_ON_CMD =  b'\x40\x06\x30\x15\x00\x20\x00\x00'
+HIGHBEAM_OFF_CMD = b'\x40\x06\x30\x15\x00\x00\x00\x00'
 
 # LTA limits
 # EPS ignores commands above this angle and causes PCS to fault
@@ -42,11 +52,22 @@ class CarController(CarControllerBase):
     self.gas = 0
     self.accel = 0
 
+    # AleSato stuff
+    self.remoteLockDoors = False
+    self.lastRemoteLockDoors = False
+    self.oneHonk = False
+    self.twoHonks = False
+    self.honk_rate_counter = 0
+    self.reset_pcm_compensation = True
+
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
     hud_control = CC.hudControl
     pcm_cancel_cmd = CC.cruiseControl.cancel
     lat_active = CC.latActive and abs(CS.out.steeringTorque) < MAX_USER_TORQUE
+
+    # AleSato stuff
+    stopping = actuators.longControlState == LongCtrlState.stopping and not CS.out.gasPressed
 
     # *** control msgs ***
     can_sends = []
@@ -100,7 +121,25 @@ class CarController(CarControllerBase):
                                                           lta_active, self.frame // 2, torque_wind_down))
 
     # *** gas and brake ***
-    pcm_accel_cmd = clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+    # pcm_accel_cmd = clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+    # PCM compensation Transition Logic (enter only at first positive calculation)
+    if CS.out.gasPressed or not CS.out.cruiseState.enabled:
+      self.reset_pcm_compensation = True
+    if CS.pcm_neutral_force >= 0:
+      self.reset_pcm_compensation = False
+
+    # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
+    should_compensate = True
+    if self.CP.carFingerprint in NO_STOP_TIMER_CAR and ((CS.out.vEgo <  1e-3 and actuators.accel < 1e-3) or stopping):
+      should_compensate = False
+    if CC.longActive and should_compensate and not self.reset_pcm_compensation:
+      accel_offset = CS.pcm_neutral_force / self.CP.mass
+    else:
+      accel_offset = 0.
+    if not CS.out.gasPressed:
+      pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+    else:
+      pcm_accel_cmd = 0.
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):
@@ -110,6 +149,43 @@ class CarController(CarControllerBase):
       self.standstill_req = False
 
     self.last_standstill = CS.out.standstill
+
+    # AleSato Stuff
+    self.remoteLockDoors = Params().get_bool("AleSato_RemoteLockDoors")
+    if self.remoteLockDoors and not self.lastRemoteLockDoors:
+      self.oneHonk = True
+      self.honk_rate_counter = self.frame
+    elif not self.remoteLockDoors and self.lastRemoteLockDoors:
+      self.twoHonks = True
+      self.honk_rate_counter = self.frame
+    self.lastRemoteLockDoors = self.remoteLockDoors
+    if self.oneHonk:
+      if self.frame == (self.honk_rate_counter + 5):
+        can_sends.append(make_can_msg(0x750, HORN_ON_CMD, 0))
+      elif self.frame == (self.honk_rate_counter + 6):
+        can_sends.append(make_can_msg(0x750, HORN_OFF_CMD, 0))
+      elif self.frame > (self.honk_rate_counter + 6):
+        can_sends.append(make_can_msg(0x750, LOCK_CMD, 0))
+        self.oneHonk = False
+    if self.twoHonks:
+      if self.frame == (self.honk_rate_counter + 5):
+        can_sends.append(make_can_msg(0x750, HORN_ON_CMD, 0))
+      elif self.frame == (self.honk_rate_counter + 6):
+        can_sends.append(make_can_msg(0x750, HORN_OFF_CMD, 0))
+      elif self.frame == (self.honk_rate_counter + 31):
+        can_sends.append(make_can_msg(0x750, HORN_ON_CMD, 0))
+      elif self.frame == (self.honk_rate_counter + 32):
+        can_sends.append(make_can_msg(0x750, HORN_OFF_CMD, 0))
+      elif self.frame > (self.honk_rate_counter + 32):
+        can_sends.append(make_can_msg(0x750, UNLOCK_CMD, 0))
+        self.twoHonks = False
+
+    # AleSato's Automatic Brake Hold
+    if self.frame % 2 == 0:
+      if CS.brakehold_governor:
+        can_sends.append(toyotacan.create_brakehold_command(self.packer, {}, True if self.frame % 730 < 727 else False))
+      else:
+        can_sends.append(toyotacan.create_brakehold_command(self.packer, CS.stock_aeb, False))
 
     # handle UI messages
     fcw_alert = hud_control.visualAlert == VisualAlert.fcw
@@ -127,15 +203,22 @@ class CarController(CarControllerBase):
         else:
           self.distance_button = 0
 
+      # AleSato
+      accel_raw = -0.4 if stopping else actuators.accel if should_compensate else pcm_accel_cmd
+
       # Lexus IS uses a different cancellation message
       if pcm_cancel_cmd and self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
         can_sends.append(toyotacan.create_acc_cancel_command(self.packer))
       elif self.CP.openpilotLongitudinalControl:
-        can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.standstill_req, lead, CS.acc_type, fcw_alert,
-                                                        self.distance_button))
+        # can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.standstill_req, lead, CS.acc_type, fcw_alert,
+        #                                                 self.distance_button))
+        # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
+        can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
+                                                        lead, CS.acc_type, self.distance_button, fcw_alert))
         self.accel = pcm_accel_cmd
       else:
-        can_sends.append(toyotacan.create_accel_command(self.packer, 0, pcm_cancel_cmd, False, lead, CS.acc_type, False, self.distance_button))
+        # can_sends.append(toyotacan.create_accel_command(self.packer, 0, pcm_cancel_cmd, False, lead, CS.acc_type, False, self.distance_button))
+        can_sends.append(toyotacan.create_accel_command(self.packer, 0, 0, True, pcm_cancel_cmd, False, lead, CS.acc_type, self.distance_button, False))
 
     # *** hud ui ***
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
@@ -152,9 +235,13 @@ class CarController(CarControllerBase):
         send_ui = True
 
       if self.frame % 20 == 0 or send_ui:
+        # can_sends.append(toyotacan.create_ui_command(self.packer, steer_alert, pcm_cancel_cmd, hud_control.leftLaneVisible,
+        #                                              hud_control.rightLaneVisible, hud_control.leftLaneDepart,
+        #                                              hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud))
+        # AleSato handle InstrumentCluster in a different way to display MADS status properly:
         can_sends.append(toyotacan.create_ui_command(self.packer, steer_alert, pcm_cancel_cmd, hud_control.leftLaneVisible,
-                                                     hud_control.rightLaneVisible, hud_control.leftLaneDepart,
-                                                     hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud))
+                                                      hud_control.rightLaneVisible, hud_control.leftLaneDepart,
+                                                      hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud, CS.madsEnabled))
 
       if (self.frame % 100 == 0 or send_ui) and (self.CP.enableDsu or self.CP.flags & ToyotaFlags.DISABLE_RADAR.value):
         can_sends.append(toyotacan.create_fcw_command(self.packer, fcw_alert))

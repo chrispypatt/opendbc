@@ -1,3 +1,4 @@
+from openpilot.common.params import Params
 import copy
 
 from opendbc.can.can_define import CANDefine
@@ -47,6 +48,29 @@ class CarState(CarStateBase):
     self.low_speed_lockout = False
     self.acc_type = 1
     self.lkas_hud = {}
+    self.params = Params()
+    self.mem_params = Params("/dev/shm/params")
+
+    # Steer always on stuff , Stolen from spektor56 and sunnyhaibin (Giants shoulders)
+    self.madsEnabled = False
+    self.lkas_enabled = False
+    self.prev_lkas_enabled = False
+
+    # Change between chill/experimental mode using steering wheel
+    self.ispressed_prev = False
+    self.distance_button_hold = 0
+    self.gap_button_counter = 0
+    self.short_press_button_counter = 0
+
+    # AleSato's automatic brakehold
+    self.time_to_brakehold = 100 * 3   # 3 seconds stopped to activate
+    self.GearShifter = structs.CarState.GearShifter # avoid Rear and Park gears
+    self.stock_aeb = {}
+    self.brakehold_condition_satisfied = False
+    self.brakehold_condition_counter = 0
+    self.reset_brakehold = False
+    self.prev_brakePressed = True
+    self.brakehold_governor = False
 
   def update(self, cp, cp_cam, *_) -> structs.CarState:
     ret = structs.CarState()
@@ -69,7 +93,7 @@ class CarState(CarStateBase):
     )
     ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-    ret.vEgoCluster = ret.vEgo * 1.015  # minimum of all the cars
+    ret.vEgoCluster = ret.vEgo * 1.095  # minimum of all the cars
 
     ret.standstill = abs(ret.vEgoRaw) < 1e-3
 
@@ -151,6 +175,7 @@ class CarState(CarStateBase):
       # ignore standstill state in certain vehicles, since pcm allows to restart with just an acceleration request
       ret.cruiseState.standstill = self.pcm_acc_status == 7
     ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
+    self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]
     ret.cruiseState.nonAdaptive = self.pcm_acc_status in (1, 2, 3, 4, 5, 6)
 
     ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["AUTO_HIGH_BEAM"])
@@ -165,16 +190,68 @@ class CarState(CarStateBase):
 
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
       self.lkas_hud = copy.copy(cp_cam.vl["LKAS_HUD"])
+      self.lkas_enabled = cp_cam.vl["LKAS_HUD"]["LKAS_STATUS"]
+      if self.prev_lkas_enabled is None:
+        self.prev_lkas_enabled = self.lkas_enabled
+      if not self.prev_lkas_enabled and self.lkas_enabled and not self.mem_params.get_bool("AleSato_SteerAlwaysOn") and ret.cruiseState.available:
+        self.mem_params.put_bool('AleSato_SteerAlwaysOn', True)
+      elif (self.prev_lkas_enabled and not self.lkas_enabled and self.mem_params.get_bool("AleSato_SteerAlwaysOn")) or not ret.cruiseState.available:
+        self.mem_params.put_bool('AleSato_SteerAlwaysOn', False)
+      if self.mem_params.get_bool("AleSato_SteerAlwaysOn"):
+        self.madsEnabled = True
+      else:
+        self.madsEnabled = False
+      self.prev_lkas_enabled = self.lkas_enabled
+
+    # Automatic BrakeHold
+    if self.CP.carFingerprint in TSS2_CAR:
+      self.stock_aeb = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
+      self.brakehold_condition_satisfied =  (ret.standstill and ret.cruiseState.available and not ret.gasPressed and \
+                                            not ret.cruiseState.enabled and (ret.gearShifter not in (self.GearShifter.reverse,\
+                                            self.GearShifter.park))and self.params.get_bool('AleSato_AutomaticBrakeHold'))
+      if self.brakehold_condition_satisfied:
+        if self.brakehold_condition_counter > self.time_to_brakehold and not self.reset_brakehold:
+          self.brakehold_governor = True
+        else:
+          self.brakehold_governor = False
+        if not self.prev_brakePressed and ret.brakePressed: # disable automatic brakehold in second brakePress
+          self.reset_brakehold = True
+        self.brakehold_condition_counter += 1
+      else:
+        self.brakehold_governor = False
+        self.reset_brakehold = False
+        self.brakehold_condition_counter = 0
+      self.prev_brakePressed = ret.brakePressed
 
     if self.CP.carFingerprint not in UNSUPPORTED_DSU_CAR:
       self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
 
     if self.CP.carFingerprint in (TSS2_CAR - RADAR_ACC_CAR):
       # distance button is wired to the ACC module (camera or radar)
-      prev_distance_button = self.distance_button
+      # prev_distance_button = self.distance_button
+      prev_distance_button = self.distance_button_hold
       self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
 
       ret.buttonEvents = create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    # change follow distances with long press
+    if self.distance_button:
+      self.short_press_button_counter += 1
+      if not self.distance_button_hold:
+        self.gap_button_counter += 1
+        if self.gap_button_counter > 20:  # 20 miliseconds
+          self.gap_button_counter = 0
+          self.distance_button_hold = True
+    else:
+      self.gap_button_counter = 0
+      self.distance_button_hold = False
+
+    # change experimental/chill mode on fly with short press
+    if not self.distance_button and self.ispressed_prev and self.short_press_button_counter < 20:
+      self.params.put_bool_nonblocking('ExperimentalMode', not self.params.get_bool("ExperimentalMode"))
+    if not self.ispressed_prev and not self.distance_button:
+      self.short_press_button_counter = 0
+    self.ispressed_prev = self.distance_button
 
     return ret
 
@@ -235,6 +312,12 @@ class CarState(CarStateBase):
         ("PRE_COLLISION", 33),
         ("ACC_CONTROL", 33),
         ("PCS_HUD", 1),
+      ]
+
+    # AleSato
+    if CP.carFingerprint in TSS2_CAR:
+      messages += [
+        ("PRE_COLLISION_2", 33),
       ]
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, 2)
