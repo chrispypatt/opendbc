@@ -151,6 +151,8 @@ class CarController(CarControllerBase):
     self.last_standstill = CS.out.standstill
 
     # AleSato Stuff
+    def make_can_msg(addr, dat, bus):
+      return [addr, dat, bus]
     self.remoteLockDoors = Params().get_bool("AleSato_RemoteLockDoors")
     if self.remoteLockDoors and not self.lastRemoteLockDoors:
       self.oneHonk = True
