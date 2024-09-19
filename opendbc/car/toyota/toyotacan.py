@@ -33,7 +33,23 @@ def create_lta_steer_command(packer, steer_control_type, steer_angle, steer_req,
   return packer.make_can_msg("STEERING_LTA", 0, values)
 
 
-def create_accel_command(packer, accel, accel_raw, stopping, pcm_cancel, standstill_req, lead, acc_type,
+def create_accel_command(packer, accel, pcm_cancel, standstill_req, lead, acc_type, fcw_alert, distance):
+  # TODO: find the exact canceling bit that does not create a chime
+  values = {
+    "ACCEL_CMD": accel,
+    "ACC_TYPE": acc_type,
+    "DISTANCE": distance,
+    "MINI_CAR": lead,
+    "PERMIT_BRAKING": 1,
+    "RELEASE_STANDSTILL": not standstill_req,
+    "CANCEL_REQ": pcm_cancel,
+    "ALLOW_LONG_PRESS": 1,
+    "ACC_CUT_IN": fcw_alert,  # only shown when ACC enabled
+  }
+  return packer.make_can_msg("ACC_CONTROL", 0, values)
+
+
+def create_my_accel_command(packer, accel, accel_raw, stopping, pcm_cancel, standstill_req, lead, acc_type,
                          update_distance_line, fcw_alert):
   # TODO: find the exact canceling bit that does not create a chime
   values = {
@@ -173,6 +189,5 @@ def create_brakehold_command(packer, stock_AEB, cut3frames):
       "PCSDIS",
       "PBPREPMP",
     ]})
-
 
   return packer.make_can_msg("PRE_COLLISION_2", 0, values)

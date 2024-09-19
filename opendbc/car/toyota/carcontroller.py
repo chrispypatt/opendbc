@@ -121,24 +121,26 @@ class CarController(CarControllerBase):
 
     # *** gas and brake ***
     # pcm_accel_cmd = clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
-    # PCM compensation Transition Logic (enter only at first positive calculation)
-    if CS.out.gasPressed or not CS.out.cruiseState.enabled:
-      self.reset_pcm_compensation = True
-    if CS.pcm_neutral_force >= 0:
-      self.reset_pcm_compensation = False
 
-    # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
-    should_compensate = True
-    if self.CP.carFingerprint in NO_STOP_TIMER_CAR and ((CS.out.vEgo <  1e-3 and actuators.accel < 1e-3) or stopping):
-      should_compensate = False
-    if CC.longActive and should_compensate and not self.reset_pcm_compensation:
-      accel_offset = CS.pcm_neutral_force / self.CP.mass
-    else:
-      accel_offset = 0.
-    if not CS.out.gasPressed:
-      pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
-    else:
-      pcm_accel_cmd = 0.
+    if True: # TODO put a param to handle
+      # PCM compensation Transition Logic (enter only at first positive calculation)
+      if CS.out.gasPressed or not CS.out.cruiseState.enabled:
+        self.reset_pcm_compensation = True
+      if CS.pcm_neutral_force >= 0:
+        self.reset_pcm_compensation = False
+
+      # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
+      should_compensate = True
+      if self.CP.carFingerprint in NO_STOP_TIMER_CAR and ((CS.out.vEgo <  1e-3 and actuators.accel < 1e-3) or stopping):
+        should_compensate = False
+      if CC.longActive and should_compensate and not self.reset_pcm_compensation:
+        accel_offset = CS.pcm_neutral_force / self.CP.mass
+      else:
+        accel_offset = 0.
+      if not CS.out.gasPressed:
+        pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+      else:
+        pcm_accel_cmd = 0.
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):
@@ -214,12 +216,12 @@ class CarController(CarControllerBase):
         # can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.standstill_req, lead, CS.acc_type, fcw_alert,
         #                                                 self.distance_button))
         # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
-        can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
+        can_sends.append(toyotacan.create_my_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
                                                         lead, CS.acc_type, self.distance_button, fcw_alert))
         self.accel = pcm_accel_cmd
       else:
         # can_sends.append(toyotacan.create_accel_command(self.packer, 0, pcm_cancel_cmd, False, lead, CS.acc_type, False, self.distance_button))
-        can_sends.append(toyotacan.create_accel_command(self.packer, 0, 0, True, pcm_cancel_cmd, False, lead, CS.acc_type, self.distance_button, False))
+        can_sends.append(toyotacan.create_my_accel_command(self.packer, 0, 0, True, pcm_cancel_cmd, False, lead, CS.acc_type, self.distance_button, False))
 
     # *** hud ui ***
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
