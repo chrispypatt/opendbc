@@ -1,6 +1,6 @@
 from openpilot.common.params import Params
 import copy
-from opendbc.car import apply_meas_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance, make_tester_present_msg, structs
+from opendbc.car import apply_meas_steer_torque_limits, apply_std_steer_angle_limits, common_fault_avoidance, make_tester_present_msg, rate_limit, structs
 from opendbc.car.can_definitions import CanData
 from opendbc.car.common.numpy_fast import clip
 from opendbc.car.interfaces import CarControllerBase
@@ -47,6 +47,8 @@ class CarController(CarControllerBase):
     self.standstill_req = False
     self.steer_rate_counter = 0
     self.distance_button = 0
+
+    self.pcm_accel_compensation = 0.0
 
     self.packer = CANPacker(dbc_name)
     self.accel = 0
@@ -120,9 +122,7 @@ class CarController(CarControllerBase):
                                                           lta_active, self.frame // 2, torque_wind_down))
 
     # *** gas and brake ***
-    # pcm_accel_cmd = clip(actuators.accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
-
-    if True: # TODO put a param to handle
+    if Params().get_bool("AleSato_CustomCarApi"):
       # PCM compensation Transition Logic (enter only at first positive calculation)
       if CS.out.gasPressed or not CS.out.cruiseState.enabled:
         self.reset_pcm_compensation = True
@@ -141,6 +141,23 @@ class CarController(CarControllerBase):
         pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
       else:
         pcm_accel_cmd = 0.
+    else:
+      # For cars where we allow a higher max acceleration of 2.0 m/s^2, compensate for PCM request overshoot
+      # TODO: validate PCM_CRUISE->ACCEL_NET for braking requests and compensate for imprecise braking as well
+      if self.CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT and CC.longActive:
+        pcm_accel_compensation = 2.0 * (CS.pcm_accel_net - actuators.accel) if actuators.accel > 0 else 0.0
+
+        # prevent compensation windup
+        if actuators.accel - pcm_accel_compensation > self.params.ACCEL_MAX:
+          pcm_accel_compensation = actuators.accel - self.params.ACCEL_MAX
+
+        self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01, 0.01)
+        pcm_accel_cmd = actuators.accel - self.pcm_accel_compensation
+      else:
+        self.pcm_accel_compensation = 0.0
+        pcm_accel_cmd = actuators.accel
+
+      pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):
@@ -206,22 +223,24 @@ class CarController(CarControllerBase):
         else:
           self.distance_button = 0
 
-      # AleSato
-      accel_raw = -0.4 if stopping else actuators.accel if should_compensate else pcm_accel_cmd
-
       # Lexus IS uses a different cancellation message
       if pcm_cancel_cmd and self.CP.carFingerprint in UNSUPPORTED_DSU_CAR:
         can_sends.append(toyotacan.create_acc_cancel_command(self.packer))
       elif self.CP.openpilotLongitudinalControl:
-        # can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.standstill_req, lead, CS.acc_type, fcw_alert,
-        #                                                 self.distance_button))
-        # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
-        can_sends.append(toyotacan.create_my_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
-                                                        lead, CS.acc_type, self.distance_button, fcw_alert))
+        if Params().get_bool("AleSato_CustomCarApi"):
+          # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
+          accel_raw = -0.4 if stopping else actuators.accel if should_compensate else pcm_accel_cmd
+          can_sends.append(toyotacan.create_my_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
+                                                          lead, CS.acc_type, self.distance_button, fcw_alert))
+        else:
+          can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.standstill_req, lead, CS.acc_type, fcw_alert,
+                                                          self.distance_button))
         self.accel = pcm_accel_cmd
       else:
-        # can_sends.append(toyotacan.create_accel_command(self.packer, 0, pcm_cancel_cmd, False, lead, CS.acc_type, False, self.distance_button))
-        can_sends.append(toyotacan.create_my_accel_command(self.packer, 0, 0, True, pcm_cancel_cmd, False, lead, CS.acc_type, self.distance_button, False))
+        if Params().get_bool("AleSato_CustomCarApi"):
+          can_sends.append(toyotacan.create_my_accel_command(self.packer, 0, 0, True, pcm_cancel_cmd, False, lead, CS.acc_type, self.distance_button, False))
+        else:
+          can_sends.append(toyotacan.create_accel_command(self.packer, 0, pcm_cancel_cmd, False, lead, CS.acc_type, False, self.distance_button))
 
     # *** hud ui ***
     if self.CP.carFingerprint != CAR.TOYOTA_PRIUS_V:
