@@ -50,6 +50,7 @@ class CarState(CarStateBase):
     self.lkas_hud = {}
     self.params = Params()
     self.pcm_accel_net = 0.0
+    self.slope_angle = 0.0
 
 
     self.mem_params = Params("/dev/shm/params")
@@ -80,8 +81,15 @@ class CarState(CarStateBase):
 
     # Describes the acceleration request from the PCM if on flat ground, may be higher or lower if pitched
     # CLUTCH->ACCEL_NET is only accurate for gas, PCM_CRUISE->ACCEL_NET is only accurate for brake
+    # These signals only have meaning when ACC is active
     if self.CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT:
-      self.pcm_accel_net = cp.vl["CLUTCH"]["ACCEL_NET"]  # - cp.vl["PCM_CRUISE"]["ACCEL_NET"]
+      # Sometimes ACC_BRAKING can be 1 while showing we're applying gas already
+      self.pcm_accel_net = max(cp.vl["CLUTCH"]["ACCEL_NET"], 0.0)
+      if cp.vl["PCM_CRUISE"]["ACC_BRAKING"]:
+        self.pcm_accel_net += min(cp.vl["PCM_CRUISE"]["ACCEL_NET"], 0.0)
+
+    # filtered pitch estimate from the car, negative is a downward slope
+    self.slope_angle = cp.vl["VSC1S07"]["ASLP"] * CV.DEG_TO_RAD
 
     ret.doorOpen = any([cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_FR"],
                         cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RL"], cp.vl["BODY_CONTROL_STATE"]["DOOR_OPEN_RR"]])
@@ -272,6 +280,7 @@ class CarState(CarStateBase):
       ("BODY_CONTROL_STATE", 3),
       ("BODY_CONTROL_STATE_2", 2),
       ("ESP_CONTROL", 3),
+      ("VSC1S07", 20),
       ("EPS_STATUS", 25),
       ("BRAKE_MODULE", 40),
       ("WHEEL_SPEEDS", 80),
