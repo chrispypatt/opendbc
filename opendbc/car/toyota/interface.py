@@ -1,3 +1,4 @@
+from openpilot.common.params import Params
 from panda import Panda
 from panda import uds
 from opendbc.car import structs, get_safety_config
@@ -45,7 +46,7 @@ class CarInterface(CarInterfaceBase):
     found_ecus = [fw.ecu for fw in car_fw]
     ret.enableDsu = len(found_ecus) > 0 and Ecu.dsu not in found_ecus and candidate not in (NO_DSU_CAR | UNSUPPORTED_DSU_CAR)
 
-    if candidate == CAR.LEXUS_ES_TSS2 and Ecu.hybrid not in found_ecus:
+    if candidate == CAR.LEXUS_ES_TSS2 and Ecu.hybrid not in found_ecus or Params().get_bool("AleSato_ForceRaiseAccLimits"):
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
     if candidate == CAR.TOYOTA_PRIUS:
