@@ -164,6 +164,11 @@ class CarController(CarControllerBase):
 
         self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01, 0.01)
         pcm_accel_cmd = actuators.accel - self.pcm_accel_compensation
+      else:
+        self.pcm_accel_compensation = 0.0
+        pcm_accel_cmd = actuators.accel
+
+      pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):
