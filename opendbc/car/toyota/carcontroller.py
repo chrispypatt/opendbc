@@ -165,7 +165,10 @@ class CarController(CarControllerBase):
         pcm_accel_compensation = clip(pcm_accel_compensation, actuators.accel - self.params.ACCEL_MAX,
                                       actuators.accel - self.params.ACCEL_MIN)
 
-        self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01, 0.01)
+        if self.CP.flags & ToyotaFlags.HYBRID:
+          self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01 * 0.25, 0.01 * 0.25)
+        else:
+          self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01, 0.01)
         pcm_accel_cmd = actuators.accel - self.pcm_accel_compensation
 
         # Along with rate limiting positive jerk below, this greatly improves gas response time

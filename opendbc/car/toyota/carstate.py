@@ -84,6 +84,8 @@ class CarState(CarStateBase):
     # These signals only have meaning when ACC is active
     if self.CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT:
       self.pcm_accel_net = max(cp.vl["CLUTCH"]["ACCEL_NET"], 0.0)
+      if self.CP.flags & ToyotaFlags.HYBRID:
+        self.pcm_accel_net += min(cp.vl["GEAR_PACKET_HYBRID"]["FDRVREAL"] / self.CP.mass, 0.0)
 
       # Sometimes ACC_BRAKING can be 1 while showing we're applying gas already
       if cp.vl["PCM_CRUISE"]["ACC_BRAKING"]:
@@ -298,6 +300,9 @@ class CarState(CarStateBase):
 
     if CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT:
       messages.append(("CLUTCH", 15))
+
+    if CP.flags & ToyotaFlags.HYBRID:
+      messages.append(("GEAR_PACKET_HYBRID", 60))
 
     if CP.carFingerprint != CAR.TOYOTA_MIRAI:
       messages.append(("ENGINE_RPM", 42))
