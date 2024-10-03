@@ -72,7 +72,7 @@ class CarState(CarStateBase):
     self.brakehold_condition_counter = 0
     self.reset_brakehold = False
     self.prev_brakePressed = True
-    self.brakehold_governor = False
+    self.brakeholdGovernor = False
 
 
   def update(self, cp, cp_cam, *_) -> structs.CarState:
@@ -234,14 +234,14 @@ class CarState(CarStateBase):
                                             self.GearShifter.park))and self.params.get_bool('AleSato_AutomaticBrakeHold'))
       if self.brakehold_condition_satisfied:
         if self.brakehold_condition_counter > self.time_to_brakehold and not self.reset_brakehold:
-          self.brakehold_governor = True
+          self.brakeholdGovernor = True
         else:
-          self.brakehold_governor = False
+          self.brakeholdGovernor = False
         if not self.prev_brakePressed and ret.brakePressed: # disable automatic brakehold in second brakePress
           self.reset_brakehold = True
         self.brakehold_condition_counter += 1
       else:
-        self.brakehold_governor = False
+        self.brakeholdGovernor = False
         self.reset_brakehold = False
         self.brakehold_condition_counter = 0
       self.prev_brakePressed = ret.brakePressed
