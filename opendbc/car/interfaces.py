@@ -286,10 +286,6 @@ class CarStateBase(ABC):
     self.cluster_min_speed = 0.0  # min speed before dropping to 0
     self.secoc_key: bytes = b"00" * 16
 
-    # AleSato stuff
-    self.madsEnabled = False
-    self.brakehold_governor = False
-
     Q = [[0.0, 0.0], [0.0, 100.0]]
     R = 0.3
     A = [[1.0, DT_CTRL], [0.0, 1.0]]

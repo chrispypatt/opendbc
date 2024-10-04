@@ -227,7 +227,7 @@ class CarController(CarControllerBase):
 
     # AleSato's Automatic Brake Hold
     if self.frame % 2 == 0:
-      if CS.brakehold_governor:
+      if CS.out.brakeholdGovernor:
         can_sends.append(toyotacan.create_brakehold_command(self.packer, {}, True if self.frame % 730 < 727 else False))
       else:
         can_sends.append(toyotacan.create_brakehold_command(self.packer, CS.stock_aeb, False))
@@ -291,7 +291,7 @@ class CarController(CarControllerBase):
         # AleSato handle InstrumentCluster in a different way to display MADS status properly:
         can_sends.append(toyotacan.create_ui_command(self.packer, steer_alert, pcm_cancel_cmd, hud_control.leftLaneVisible,
                                                       hud_control.rightLaneVisible, hud_control.leftLaneDepart,
-                                                      hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud, CS.madsEnabled))
+                                                      hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud, CS.out.madsEnabled))
 
       if (self.frame % 100 == 0 or send_ui) and (self.CP.enableDsu or self.CP.flags & ToyotaFlags.DISABLE_RADAR.value):
         can_sends.append(toyotacan.create_fcw_command(self.packer, fcw_alert))
