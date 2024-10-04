@@ -114,6 +114,10 @@ class CarState:
   # process meta
   cumLagMs: float = auto_field()
 
+  # AleSato stuff
+  madsEnabled: bool = auto_field()
+  brakeholdGovernor: bool = auto_field()
+
   @auto_dataclass
   class WheelSpeeds:
     # optional wheel speeds

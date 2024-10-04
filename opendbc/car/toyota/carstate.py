@@ -54,7 +54,7 @@ class CarState(CarStateBase):
 
     self.mem_params = Params("/dev/shm/params")
     # Steer always on stuff , Stolen from spektor56 and sunnyhaibin (Giants shoulders)
-    self.madsEnabled = False
+    # ret.madsEnabled = False
     self.lkas_enabled = False
     self.prev_lkas_enabled = False
 
@@ -72,7 +72,7 @@ class CarState(CarStateBase):
     self.brakehold_condition_counter = 0
     self.reset_brakehold = False
     self.prev_brakePressed = True
-    self.brakeholdGovernor = False
+    # ret.brakeholdGovernor = False
 
 
   def update(self, cp, cp_cam, *_) -> structs.CarState:
@@ -221,9 +221,9 @@ class CarState(CarStateBase):
       elif (self.prev_lkas_enabled and not self.lkas_enabled and self.mem_params.get_bool("AleSato_SteerAlwaysOn")) or not ret.cruiseState.available:
         self.mem_params.put_bool('AleSato_SteerAlwaysOn', False)
       if self.mem_params.get_bool("AleSato_SteerAlwaysOn"):
-        self.madsEnabled = True
+        ret.madsEnabled = True
       else:
-        self.madsEnabled = False
+        ret.madsEnabled = False
       self.prev_lkas_enabled = self.lkas_enabled
 
     # Automatic BrakeHold
@@ -234,14 +234,14 @@ class CarState(CarStateBase):
                                             self.GearShifter.park))and self.params.get_bool('AleSato_AutomaticBrakeHold'))
       if self.brakehold_condition_satisfied:
         if self.brakehold_condition_counter > self.time_to_brakehold and not self.reset_brakehold:
-          self.brakeholdGovernor = True
+          ret.brakeholdGovernor = True
         else:
-          self.brakeholdGovernor = False
+          ret.brakeholdGovernor = False
         if not self.prev_brakePressed and ret.brakePressed: # disable automatic brakehold in second brakePress
           self.reset_brakehold = True
         self.brakehold_condition_counter += 1
       else:
-        self.brakeholdGovernor = False
+        ret.brakeholdGovernor = False
         self.reset_brakehold = False
         self.brakehold_condition_counter = 0
       self.prev_brakePressed = ret.brakePressed
