@@ -322,9 +322,6 @@ class CarState(CarStateBase):
     if CP.flags & ToyotaFlags.HYBRID:
       messages.append(("GEAR_PACKET_HYBRID", 60))
 
-    if CP.carFingerprint != CAR.TOYOTA_MIRAI:
-      messages.append(("ENGINE_RPM", 42))
-
     if CP.carFingerprint in UNSUPPORTED_DSU_CAR:
       messages.append(("DSU_CRUISE", 5))
       messages.append(("PCM_CRUISE_ALT", 1))
