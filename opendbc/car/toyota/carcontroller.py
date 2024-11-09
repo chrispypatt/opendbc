@@ -167,63 +167,6 @@ class CarController(CarControllerBase):
         can_sends.append(lta_steer_2)
 
     # *** gas and brake ***
-    if Params().get_bool("AleSato_CustomCarApi"):
-      # PCM compensation Transition Logic (enter only at first positive calculation)
-      if CS.out.gasPressed or not CS.out.cruiseState.enabled:
-        self.reset_pcm_compensation = True
-      if CS.pcm_neutral_force >= 0:
-        self.reset_pcm_compensation = False
-
-      # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
-      should_compensate = True
-      if self.CP.carFingerprint in NO_STOP_TIMER_CAR and ((CS.out.vEgo <  1e-3 and actuators.accel < 1e-3) or stopping):
-        should_compensate = False
-      if CC.longActive and should_compensate and not self.reset_pcm_compensation:
-        accel_offset = CS.pcm_neutral_force / self.CP.mass
-      else:
-        accel_offset = 0.
-      if not CS.out.gasPressed:
-        pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
-      else:
-        pcm_accel_cmd = 0.
-    else:
-      # For cars where we allow a higher max acceleration of 2.0 m/s^2, compensate for PCM request overshoot and imprecise braking
-      if self.CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT and CC.longActive and not CS.out.cruiseState.standstill:
-        # calculate amount of acceleration PCM should apply to reach target, given pitch
-        if len(CC.orientationNED) == 3:
-          accel_due_to_pitch = math.sin(CC.orientationNED[1]) * ACCELERATION_DUE_TO_GRAVITY
-        else:
-          accel_due_to_pitch = 0.0
-
-        net_acceleration_request = actuators.accel + accel_due_to_pitch
-
-        # let PCM handle stopping for now
-        pcm_accel_compensation = 0.0
-        if not stopping:
-          pcm_accel_compensation = 2.0 * (CS.pcm_accel_net - net_acceleration_request)
-
-        # prevent compensation windup
-        pcm_accel_compensation = clip(pcm_accel_compensation, actuators.accel - self.params.ACCEL_MAX,
-                                      actuators.accel - self.params.ACCEL_MIN)
-
-        if self.CP.flags & ToyotaFlags.HYBRID:
-          self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01 * 0.25, 0.01 * 0.25)
-        else:
-          self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.01, 0.01)
-        pcm_accel_cmd = actuators.accel - self.pcm_accel_compensation
-
-        # Along with rate limiting positive jerk below, this greatly improves gas response time
-        # Consider the net acceleration request that the PCM should be applying (pitch included)
-        if net_acceleration_request < 0.1 or stopping:
-          self.permit_braking = True
-        elif net_acceleration_request > 0.2:
-          self.permit_braking = False
-      else:
-        self.pcm_accel_compensation = 0.0
-        pcm_accel_cmd = actuators.accel
-        self.permit_braking = True
-
-      pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
 
     # on entering standstill, send standstill request
     if CS.out.standstill and not self.last_standstill and (self.CP.carFingerprint not in NO_STOP_TIMER_CAR):
@@ -288,15 +231,66 @@ class CarController(CarControllerBase):
           else:
             self.distance_button = 0
 
+        # internal PCM gas command can get stuck unwinding from negative accel so we apply a generous rate limit
+        pcm_accel_cmd = min(actuators.accel, self.accel + ACCEL_WINDUP_LIMIT) if CC.longActive else 0.0
+
+        # calculate amount of acceleration PCM should apply to reach target, given pitch
+        accel_due_to_pitch = math.sin(CC.orientationNED[1]) * ACCELERATION_DUE_TO_GRAVITY if len(CC.orientationNED) == 3 else 0.0
+        net_acceleration_request = pcm_accel_cmd + accel_due_to_pitch
+
+        # For cars where we allow a higher max acceleration of 2.0 m/s^2, compensate for PCM request overshoot and imprecise braking
+        if self.CP.flags & ToyotaFlags.RAISED_ACCEL_LIMIT and CC.longActive and not CS.out.cruiseState.standstill:
+          # let PCM handle stopping for now
+          pcm_accel_compensation = 0.0
+          if not stopping:
+            pcm_accel_compensation = 2.0 * (CS.pcm_accel_net - net_acceleration_request)
+
+          # prevent compensation windup
+          pcm_accel_compensation = clip(pcm_accel_compensation, pcm_accel_cmd - self.params.ACCEL_MAX,
+                                        pcm_accel_cmd - self.params.ACCEL_MIN)
+
+          self.pcm_accel_compensation = rate_limit(pcm_accel_compensation, self.pcm_accel_compensation, -0.03, 0.03)
+          pcm_accel_cmd = pcm_accel_cmd - self.pcm_accel_compensation
+
+        else:
+          self.pcm_accel_compensation = 0.0
+          self.permit_braking = True
+
+        # Along with rate limiting positive jerk above, this greatly improves gas response time
+        # Consider the net acceleration request that the PCM should be applying (pitch included)
+        if net_acceleration_request < 0.1 or stopping or not CC.longActive:
+          self.permit_braking = True
+        elif net_acceleration_request > 0.2:
+          self.permit_braking = False
+
+        pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+
+        if Params().get_bool("AleSato_CustomCarApi"):
+          # PCM compensation Transition Logic (enter only at first positive calculation)
+          if CS.out.gasPressed or not CS.out.cruiseState.enabled:
+            self.reset_pcm_compensation = True
+          if CS.pcm_neutral_force >= 0:
+            self.reset_pcm_compensation = False
+
+          # NO_STOP_TIMER_CAR will creep if compensation is applied when stopping or stopped, don't compensate when stopped or stopping
+          should_compensate = True
+          if self.CP.carFingerprint in NO_STOP_TIMER_CAR and ((CS.out.vEgo <  1e-3 and actuators.accel < 1e-3) or stopping):
+            should_compensate = False
+          if CC.longActive and should_compensate and not self.reset_pcm_compensation:
+            accel_offset = CS.pcm_neutral_force / self.CP.mass
+          else:
+            accel_offset = 0.
+          if not CS.out.gasPressed:
+            pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+          else:
+            pcm_accel_cmd = 0.
+
         if Params().get_bool("AleSato_CustomCarApi"):
           # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
           accel_raw = -0.4 if stopping else actuators.accel if should_compensate else pcm_accel_cmd
           can_sends.append(toyotacan.create_my_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
                                                           lead, CS.acc_type, self.distance_button, fcw_alert))
         else:
-          # internal PCM gas command can get stuck unwinding from negative accel so we apply a generous rate limit
-          pcm_accel_cmd = min(pcm_accel_cmd, self.accel + ACCEL_WINDUP_LIMIT) if CC.longActive else 0.0
-
           can_sends.append(toyotacan.create_accel_command(self.packer, pcm_accel_cmd, pcm_cancel_cmd, self.permit_braking, self.standstill_req, lead,
                                                           CS.acc_type, fcw_alert, self.distance_button))
         self.accel = pcm_accel_cmd
