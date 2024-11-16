@@ -91,8 +91,6 @@ class CarState(CarStateBase):
     # These signals only have meaning when ACC is active
     if "CLUTCH" in cp.vl:
       self.pcm_accel_net = max(cp.vl["CLUTCH"]["ACCEL_NET"], 0.0)
-      if self.CP.flags & ToyotaFlags.HYBRID:
-        self.pcm_accel_net += min(cp.vl["GEAR_PACKET_HYBRID"]["FDRVREAL"] / self.CP.mass, 0.0)
 
       # Sometimes ACC_BRAKING can be 1 while showing we're applying gas already
       if cp.vl["PCM_CRUISE"]["ACC_BRAKING"]:
@@ -319,9 +317,6 @@ class CarState(CarStateBase):
     if CP.carFingerprint in (TSS2_CAR - SECOC_CAR - {CAR.LEXUS_NX_TSS2, CAR.TOYOTA_ALPHARD_TSS2, CAR.LEXUS_IS_TSS2}):
       pt_messages.append(("CLUTCH", 15))
 
-    if CP.flags & ToyotaFlags.HYBRID:
-      messages.append(("GEAR_PACKET_HYBRID", 60))
-
     if CP.carFingerprint in UNSUPPORTED_DSU_CAR:
       pt_messages.append(("DSU_CRUISE", 5))
       pt_messages.append(("PCM_CRUISE_ALT", 1))
@@ -362,7 +357,7 @@ class CarState(CarStateBase):
 
     # AleSato
     if CP.carFingerprint in TSS2_CAR:
-      messages += [
+      cam_messages += [
         ("PRE_COLLISION_2", 33),
       ]
 
