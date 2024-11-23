@@ -202,7 +202,7 @@ def create_brakehold_command(packer, stock_AEB, cut3frames):
 def cut_traction_command(packer, _counter):
   values = {
     "_COUNTER": _counter,
-    "FORCE": 255,
+    "FORCE": -255,
     "STATE": 3,
     "BRAKE_STATUS": 0,
     "PRECOLLISION_ACTIVE": 1,
