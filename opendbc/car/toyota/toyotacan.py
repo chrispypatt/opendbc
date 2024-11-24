@@ -198,13 +198,3 @@ def create_brakehold_command(packer, stock_AEB, cut3frames):
     ]})
 
   return packer.make_can_msg("PRE_COLLISION_2", 0, values)
-
-def cut_traction_command(packer, _counter):
-  values = {
-    "_COUNTER": _counter,
-    "FORCE": -255,
-    "STATE": 3,
-    "BRAKE_STATUS": 0,
-    "PRECOLLISION_ACTIVE": 1,
-  }
-  return packer.make_can_msg("PRE_COLLISION", 0, values)
