@@ -373,7 +373,7 @@ class CarController(CarControllerBase):
           else:
             accel_offset = 0.
           if not CS.out.gasPressed:
-            pcm_accel_cmd = clip(actuators.accel + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+            pcm_accel_cmd = clip(pcm_accel_cmd + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
           else:
             pcm_accel_cmd = 0.
 
