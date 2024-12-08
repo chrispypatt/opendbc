@@ -51,6 +51,7 @@ class CarInterface(CarInterfaceBase):
     if Ecu.hybrid in found_ecus:
       ret.flags |= ToyotaFlags.HYBRID.value
 
+    # TODO: expand to the rest of the cars
     if (candidate in (CAR.LEXUS_ES_TSS2,) and not (ret.flags & ToyotaFlags.HYBRID.value)) or Params().get_bool("AleSato_ForceRaiseAccLimits"):
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
