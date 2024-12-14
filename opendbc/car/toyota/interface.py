@@ -51,10 +51,6 @@ class CarInterface(CarInterfaceBase):
     if Ecu.hybrid in found_ecus:
       ret.flags |= ToyotaFlags.HYBRID.value
 
-    # TODO: expand to the rest of the cars
-    if (candidate in (CAR.LEXUS_ES_TSS2,) and not (ret.flags & ToyotaFlags.HYBRID.value)) or Params().get_bool("AleSato_ForceRaiseAccLimits"):
-      ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
-
     if candidate == CAR.TOYOTA_PRIUS:
       stop_and_go = True
       # Only give steer angle deadzone to for bad angle sensor prius
@@ -141,6 +137,9 @@ class CarInterface(CarInterfaceBase):
     if candidate in TSS2_CAR:
       # on stock Toyota this is -2.5
       ret.stopAccel = -0.4
+
+      ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
+
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.25
       ret.stoppingDecelRate = 0.1  # reach stopping target smoothly
