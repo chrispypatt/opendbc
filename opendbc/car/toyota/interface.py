@@ -1,4 +1,3 @@
-from openpilot.common.params import Params
 from panda import Panda
 from panda import uds
 from opendbc.car import Bus, structs, get_safety_config
