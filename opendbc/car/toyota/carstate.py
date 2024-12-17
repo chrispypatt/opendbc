@@ -193,7 +193,8 @@ class CarState(CarStateBase):
       # ignore standstill state in certain vehicles, since pcm allows to restart with just an acceleration request
       ret.cruiseState.standstill = self.pcm_acc_status == 7
     ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
-    self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]
+    if not self.CP.flags & ToyotaFlags.SECOC.value:
+      self.pcm_neutral_force = cp.vl["PCM_CRUISE"]["NEUTRAL_FORCE"]
     ret.cruiseState.nonAdaptive = self.pcm_acc_status in (1, 2, 3, 4, 5, 6)
 
     ret.genericToggle = bool(cp.vl["LIGHT_STALK"]["FRONT_FOG"])
@@ -254,7 +255,7 @@ class CarState(CarStateBase):
       self.short_press_button_counter += 1
       if not self.distance_button_hold:
         self.gap_button_counter += 1
-        if self.gap_button_counter > 20:  # 20 miliseconds
+        if self.gap_button_counter > 20:  # 20 milliseconds
           self.gap_button_counter = 0
           self.distance_button_hold = True
     else:

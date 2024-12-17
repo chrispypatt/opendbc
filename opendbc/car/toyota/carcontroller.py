@@ -247,10 +247,11 @@ class CarController(CarControllerBase):
 
     # AleSato's Automatic Brake Hold
     if self.frame % 2 == 0:
-      if CS.out.brakeholdGovernor:
-        can_sends.append(toyotacan.create_brakehold_command(self.packer, {}, True if self.frame % 730 < 727 else False))
-      else:
-        can_sends.append(toyotacan.create_brakehold_command(self.packer, CS.stock_aeb, False))
+      if not self.CP.flags & ToyotaFlags.SECOC.value:
+        if CS.out.brakeholdGovernor:
+          can_sends.append(toyotacan.create_brakehold_command(self.packer, {}, True if self.frame % 730 < 727 else False))
+        else:
+          can_sends.append(toyotacan.create_brakehold_command(self.packer, CS.stock_aeb, False))
 
     # handle UI messages
     fcw_alert = hud_control.visualAlert == VisualAlert.fcw
