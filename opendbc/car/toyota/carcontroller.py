@@ -312,6 +312,7 @@ class CarController(CarControllerBase):
         elif net_acceleration_request_min > 0.3:
           self.permit_braking = False
 
+        pcm_my_accel_cmd = pcm_accel_cmd
         pcm_accel_cmd = clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
 
         if Params().get_bool("AleSato_CustomCarApi"):
@@ -330,11 +331,10 @@ class CarController(CarControllerBase):
           else:
             accel_offset = 0.
           if not CS.out.gasPressed:
-            pcm_accel_cmd = clip(pcm_accel_cmd + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
+            pcm_accel_cmd = clip(pcm_my_accel_cmd + accel_offset, self.params.ACCEL_MIN, self.params.ACCEL_MAX)
           else:
             pcm_accel_cmd = 0.
 
-        if Params().get_bool("AleSato_CustomCarApi"):
           # AleSato apply in a diff way the neutralForce compensation than Irene's (Cydia2020)
           accel_raw = -0.4 if stopping else actuators.accel if should_compensate else pcm_accel_cmd
           can_sends.append(toyotacan.create_my_accel_command(self.packer, pcm_accel_cmd, accel_raw, stopping, pcm_cancel_cmd, self.standstill_req, \
