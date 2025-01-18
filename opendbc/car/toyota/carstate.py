@@ -225,7 +225,7 @@ class CarState(CarStateBase):
       self.prev_lkas_enabled = self.lkas_enabled
 
     # Automatic BrakeHold
-    if self.CP.carFingerprint in TSS2_CAR:
+    if (self.CP.carFingerprint in TSS2_CAR) and (not self.CP.flags & ToyotaFlags.SECOC.value):
       self.stock_aeb = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
       self.brakehold_condition_satisfied =  (ret.standstill and ret.cruiseState.available and not ret.gasPressed and \
                                             not ret.cruiseState.enabled and (ret.gearShifter not in (self.GearShifter.reverse,\
@@ -251,7 +251,7 @@ class CarState(CarStateBase):
       # distance button is wired to the ACC module (camera or radar)
       # prev_distance_button = self.distance_button
       prev_distance_button = self.distance_button_hold
-      if self.CP.carFingerprint in (SECOC_CAR):
+      if (self.CP.carFingerprint in (SECOC_CAR)) and not (self.CP.carFingerprint in RADAR_ACC_CAR):
         self.distance_button = cp.vl["PCM_CRUISE_4"]["DISTANCE"]
       else:
         self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
@@ -301,8 +301,11 @@ class CarState(CarStateBase):
         ("GEAR_PACKET_HYBRID", 60),
         ("SECOC_SYNCHRONIZATION", 10),
         ("GAS_PEDAL", 42),
-        ("PCM_CRUISE_4", 1),
       ]
+      if CP.carFingerprint not in RADAR_ACC_CAR:
+        pt_messages += [
+          ("PCM_CRUISE_4", 1),
+        ]
     else:
       pt_messages.append(("VSC1S07", 20))
       if CP.carFingerprint not in [CAR.TOYOTA_MIRAI]:
@@ -355,7 +358,7 @@ class CarState(CarStateBase):
         ]
 
     # AleSato
-    if CP.carFingerprint in TSS2_CAR:
+    if (CP.carFingerprint in TSS2_CAR) and (not CP.flags & ToyotaFlags.SECOC.value):
       cam_messages += [
         ("PRE_COLLISION_2", 33),
       ]
