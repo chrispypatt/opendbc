@@ -302,7 +302,7 @@ class CarController(CarControllerBase):
         pcm_my_accel_cmd = pcm_accel_cmd
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
-        if Params().get_bool("AleSato_CustomCarApi"):
+        if (Params().get_bool("AleSato_CustomCarApi")) and not (self.CP.flags & ToyotaFlags.SECOC.value):
           # PCM compensation Transition Logic (enter only at first positive calculation)
           if CS.out.gasPressed or not CS.out.cruiseState.enabled:
             self.reset_pcm_compensation = True
@@ -369,7 +369,7 @@ class CarController(CarControllerBase):
       if self.frame % 20 == 0 or send_ui:
         # can_sends.append(toyotacan.create_ui_command(self.packer, steer_alert, pcm_cancel_cmd, hud_control.leftLaneVisible,
         #                                              hud_control.rightLaneVisible, hud_control.leftLaneDepart,
-        #                                              hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud))
+        #                                              hud_control.rightLaneDepart, CC.enabled, CS.lkas_hud))git s
         # AleSato handle InstrumentCluster in a different way to display MADS status properly:
         can_sends.append(toyotacan.create_ui_command(self.packer, steer_alert, pcm_cancel_cmd, hud_control.leftLaneVisible,
                                                       hud_control.rightLaneVisible, hud_control.leftLaneDepart,
