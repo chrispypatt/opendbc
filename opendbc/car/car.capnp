@@ -238,8 +238,8 @@ struct CarState {
 
 
   # AleSato stuff
-  madsEnabled @57 :Bool;
-  brakeholdGovernor @58 :Bool;
+  madsEnabled @58 :Bool;
+  brakeholdGovernor @59 :Bool;
 
 
   struct WheelSpeeds {
