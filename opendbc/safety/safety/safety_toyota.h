@@ -9,6 +9,7 @@
 #define TOYOTA_COMMON_TX_MSGS \
   TOYOTA_BASE_TX_MSGS \
   {0x2E4, 0, 5}, \
+  {0x750, 0, 8}, /* white list 0x750 for Enhanced Diagnostic Request */ \
 
 #define TOYOTA_COMMON_SECOC_TX_MSGS \
   TOYOTA_BASE_TX_MSGS \
@@ -21,11 +22,21 @@
   {0x411, 0, 8},  /* PCS_HUD */                                                                                                             \
   {0x750, 0, 8},  /* radar diagnostic address */                                                                                            \
 
+#define TOYOTA_COMMON_LONG_SECOC_TX_MSGS                                                                                                    \
+  TOYOTA_COMMON_SECOC_TX_MSGS                                                                                                               \
+  {0x283, 0, 7}, {0x2E6, 0, 8}, {0x2E7, 0, 8}, {0x33E, 0, 7}, {0x344, 0, 8}, {0x365, 0, 7}, {0x366, 0, 7}, {0x4CB, 0, 8},  /* DSU bus 0 */  \
+  {0x128, 1, 6}, {0x141, 1, 4}, {0x160, 1, 8}, {0x161, 1, 7}, {0x470, 1, 4},  /* DSU bus 1 */                                               \
+  {0x411, 0, 8},  /* PCS_HUD */                                                                                                             \
+  {0x750, 0, 8},  /* radar diagnostic address */                                                                                            \
+  {0x183, 0, 8},                                                                                                                            \
+
 #define TOYOTA_COMMON_RX_CHECKS(lta)                                                                        \
   {.msg = {{ 0xaa, 0, 8, .check_checksum = false, .frequency = 83U}, { 0 }, { 0 }}},                        \
   {.msg = {{0x260, 0, 8, .check_checksum = true, .quality_flag = (lta), .frequency = 50U}, { 0 }, { 0 }}},  \
   {.msg = {{0x1D2, 0, 8, .check_checksum = true, .frequency = 33U},                                         \
            {0x176, 0, 8, .check_checksum = true, .frequency = 32U}, { 0 }}},                                \
+  {.msg = {{0x1D3, 0, 8, .check_checksum = true, .frequency = 33U}, { 0 }, { 0 }}}, /* MADS Cruise Main */  \
+  {.msg = {{0x412, 2, 8, .check_checksum = false, .frequency = 01U}, { 0 }, { 0 }}}, /* MADS LKAS Button */ \
   {.msg = {{0x101, 0, 8, .check_checksum = false, .frequency = 50U},                                        \
            {0x224, 0, 8, .check_checksum = false, .frequency = 40U},                                        \
            {0x226, 0, 8, .check_checksum = false, .frequency = 40U}}},                                      \
@@ -64,7 +75,21 @@ static bool toyota_get_quality_flag_valid(const CANPacket_t *to_push) {
 static void toyota_rx_hook(const CANPacket_t *to_push) {
   const int TOYOTA_LTA_MAX_ANGLE = 1657;  // EPS only accepts up to 94.9461
 
-  if (GET_BUS(to_push) == 0U) {
+  if (GET_BUS(to_push) == 2U) {
+    int addr = GET_ADDR(to_push);
+    if (addr == 0x412) {
+      bool set_me = (GET_BYTE(to_push, 0) & 0xC0U) > 0; // LKAS_STATUS
+      bool set_me2 = (GET_BYTE(to_push, 3) & 0xC0U) > 0; // LDA_ON_MESSAGE
+      if(set_me && !set_me_prev) {
+        lateral_controls_allowed = 1;
+        print("activate by LKAS_STATUS\n");
+      } else if(set_me2 && !set_me_prev) {
+        lateral_controls_allowed = 1;
+        print("ACTIVATE by LDA_ON_MESSAGE\n\n");
+      }
+      set_me_prev = set_me || set_me2;
+    }
+  } else if (GET_BUS(to_push) == 0U) {
     int addr = GET_ADDR(to_push);
 
     // get eps motor torque (0.66 factor in dbc)
@@ -122,6 +147,17 @@ static void toyota_rx_hook(const CANPacket_t *to_push) {
       }
       if (toyota_alt_brake && (addr == 0x224)) {
         brake_pressed = GET_BIT(to_push, 5U);  // BRAKE_MODULE.BRAKE_PRESSED (toyota_new_mc_pt_generated.dbc)
+      }
+    }
+
+    // wrap lateral controls on main
+    if (addr == 0x1D3) {
+      // ACC main switch on is a prerequisite to enter controls, exit controls immediately on main switch off
+      // Signal: PCM_CRUISE_2/MAIN_ON at 15th bit
+      acc_main_on = GET_BIT(to_push, 15U);
+      if (!acc_main_on) {
+        lateral_controls_allowed = 0;
+        print("DISALLOWED \n");
       }
     }
 
@@ -303,14 +339,25 @@ static bool toyota_tx_hook(const CANPacket_t *to_send) {
         }
       }
     }
+
+    // AleSato's automatic brakehold
+    if ((addr == 0x344) && (alternative_experience & ALT_EXP_ALLOW_AEB)) {
+      if(vehicle_moving || gas_pressed || !acc_main_on) {
+        tx = false;
+      }
+    }
   }
 
   // UDS: Only tester present ("\x0F\x02\x3E\x00\x00\x00\x00\x00") allowed on diagnostics address
   if (addr == 0x750) {
     // this address is sub-addressed. only allow tester present to radar (0xF)
     bool invalid_uds_msg = (GET_BYTES(to_send, 0, 4) != 0x003E020FU) || (GET_BYTES(to_send, 4, 4) != 0x0U);
-    if (invalid_uds_msg) {
-      tx = 0;
+    // AleSato added some more hack'sss
+    bool valid_uds_msgs = (GET_BYTES(to_send, 0, 4) == 0x11300540U); // un/lock doors
+    valid_uds_msgs |= (GET_BYTES(to_send, 0, 4) == 0x06300440U); // horn
+    valid_uds_msgs |= (GET_BYTES(to_send, 0, 4) == 0x15300640U); // highbeam
+    if (invalid_uds_msg && !valid_uds_msgs) {
+      tx = false;
     }
   }
 
@@ -328,6 +375,10 @@ static safety_config toyota_init(uint16_t param) {
 
   static const CanMsg TOYOTA_LONG_TX_MSGS[] = {
     TOYOTA_COMMON_LONG_TX_MSGS
+  };
+
+  static const CanMsg TOYOTA_SECOC_LONG_TX_MSGS[] = {
+    TOYOTA_COMMON_LONG_SECOC_TX_MSGS
   };
 
   // safety param flags
@@ -356,7 +407,11 @@ static safety_config toyota_init(uint16_t param) {
       SET_TX_MSGS(TOYOTA_TX_MSGS, ret);
     }
   } else {
-    SET_TX_MSGS(TOYOTA_LONG_TX_MSGS, ret);
+    if (toyota_secoc) {
+      SET_TX_MSGS(TOYOTA_SECOC_LONG_TX_MSGS, ret);
+    } else {
+      SET_TX_MSGS(TOYOTA_LONG_TX_MSGS, ret);
+    }
   }
 
   if (toyota_lta) {
@@ -393,7 +448,10 @@ static int toyota_fwd_hook(int bus_num, int addr) {
     is_lkas_msg |= toyota_secoc && (addr == 0x131);
     // in TSS2 the camera does ACC as well, so filter 0x343
     bool is_acc_msg = (addr == 0x343);
-    bool block_msg = is_lkas_msg || (is_acc_msg && !toyota_stock_longitudinal);
+    // Block AEB when stoped to use as a automatic brakehold
+    bool is_aeb_msg = ((addr == 0x344) && (alternative_experience & ALT_EXP_ALLOW_AEB));
+    is_acc_msg |= toyota_secoc && (addr == 0x183);
+    bool block_msg = is_lkas_msg || (is_acc_msg && !toyota_stock_longitudinal) || (is_aeb_msg && !vehicle_moving && acc_main_on && !gas_pressed);
     if (!block_msg) {
       bus_fwd = 0;
     }
